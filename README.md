@@ -4,7 +4,7 @@
 - Clone this repository.
 - Run the following commands:
   - docker build -t todo-api .
-  - docker-compose up -f
+  - docker-compose up -f docker-compose.yaml
 
 ## API Routes
 
