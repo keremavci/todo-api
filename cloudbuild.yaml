@@ -1,0 +1,98 @@
+substitutions:
+  _IMAGE_NAME: todo-api
+  _ZONE: us-central1-c
+  _CLUSTER: cluster-1
+  _NAMESPACE: staging
+
+steps:
+  - id: set-docker-config
+    name: gcr.io/cloud-builders/docker
+    dir: /root
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir .docker &&
+        ln -s $$HOME/.docker/config.json .docker/config.json
+    volumes:
+      - name: user.home
+        path: /root
+
+  - id: build-docker-image
+    name: "gcr.io/cloud-builders/docker"
+    waitFor:
+      - set-docker-config
+    args: ["build", "-t", "gcr.io/${PROJECT_ID}/${_IMAGE_NAME}:${COMMIT_SHA}", "."]
+    volumes:
+      - name: user.home
+        path: /root
+
+  - id: push-docker-image
+    name: "gcr.io/cloud-builders/docker"
+    waitFor:
+      - build-docker-image
+    args: ["push", "gcr.io/${PROJECT_ID}/${_IMAGE_NAME}:${COMMIT_SHA}"]
+    volumes:
+      - name: user.home
+        path: /root
+
+  - id: configure-kubectl
+    name: gcr.io/cloud-builders/kubectl
+    waitFor:
+      - push-docker-image
+    args:
+      - cluster-info
+    env:
+      - CLOUDSDK_CONTAINER_CLUSTER=${_CLUSTER}
+      - CLOUDSDK_COMPUTE_ZONE=${_ZONE}
+      - KUBECONFIG=/workspace/.kube/config
+
+  - name: gcr.io/$PROJECT_ID/helm
+    id: deploy-to-staging
+    waitFor:
+      - configure-kubectl
+    args:
+      - upgrade
+      - --install
+      - ${_IMAGE_NAME}
+      - ./helm
+      - -n
+      - ${_NAMESPACE}
+      - -f
+      - ./helm/values.yaml
+      - -f
+      - ./helm/values-staging.yaml
+      - --set-string
+      - image.tag=${COMMIT_SHA}
+      - --set-string
+      - version=${COMMIT_SHA}
+    env:
+      - KUBECONFIG=/workspace/.kube/config
+      - TILLERLESS=true
+
+  - name: gcr.io/cloud-builders/kubectl
+    id: check-deployment
+    waitFor:
+      - deploy-to-staging
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        kubectl rollout status deployment/${_IMAGE_NAME} --watch --timeout=5m
+        tryCount=0
+        waitTime=1
+        while true; do
+           tryCount=$((tryCount+1))
+           sleep $waitTime
+           allPodStatus=$(kubectl get pods -l version=${COMMIT_SHA} -n ${_NAMESPACE} -o jsonpath='{..status.conditions[?(@.type=="Ready")].status}')
+           if [[ ! "$allPodStatus" == *"False"* ]]; then
+             echo "OK!"
+             break
+           elif [ $tryCount -gt 59 ]; then
+             echo "All of $1 pods cannot up in $((tryCount*waitTime)) seconds"
+             exit 1
+           fi
+        done
+    env:
+      - KUBECONFIG=/workspace/.kube/config
+      - TILLERLESS=true
