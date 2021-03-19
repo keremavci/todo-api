@@ -17,8 +17,8 @@ Path | Method  | Description
 /api/todo/{todoId} | DELETE | Delete Todo
 
 ### Environment Variables
-Name | Type | Default | Description / Mandatory
----|---|---|---
+Name | Type | Default | Description | Mandatory
+---|---|---|---|---
 TODO_API_HOST | string |  | http address | no
 TODO_API_PORT | string | 8080 | http port | no
 TODO_API_API_BASE_URI | string | api | api base path | no
